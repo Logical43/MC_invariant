@@ -14,6 +14,8 @@ from keras.utils.np_utils import to_categorical
 from sklearn.preprocessing import scale
 from keras.utils import plot_model
 from keras.callbacks import History
+from sklearn.metrics import roc_curve as roc
+from sklearn.metrics import roc_auc_score
 
 # variables for the dataset
 variables_map = {
@@ -32,43 +34,43 @@ repeat = False
 # variables for the NN
 LR = 0.01      # learning rate
 MOM = 0.5       # momentum
-DEC = 0.00001   # decay rate
-BATCH = 16     # batch size
-EPOCH = 1000    # number of epochs
+DEC = 0.0001   # decay rate
+BATCH = 32     # batch size
+EPOCH = 100    # number of epochs
 
 def main():
 	# Prepare data
     df_even = pd.read_csv('DNN/adversary_even_log.csv', index_col=0)
     df_even = df_even.loc[df_even['Class']==0]
     df_even = df_even.loc[df_even['generator']!=2]
-#    df_even = df_even.sample(frac=0.5)
-    df_even = df_even.loc[df_even['decision_value']<0.2]
-    df_even = df_even.loc[df_even['pTB1']>0]
+#    df_even = df_even.loc[df_even['decision_value']<0.2]
+#    df_even = df_even.loc[df_even['pTB1']>0.3]
+#    df_even = df_even.loc[df_even['mBB']>0.3]
+
     print(len(df_even.loc[df_even['generator']==0]))
     print(len(df_even.loc[df_even['generator']==1]))
 
     df_odd = pd.read_csv('DNN/adversary_odd_log.csv', index_col=0)
     df_odd = df_odd.loc[df_odd['Class']==0]
     df_odd = df_odd.loc[df_odd['generator']!=2]
-    df_odd = df_odd.loc[df_odd['pTB1']>0]
-#    df_odd = df_odd.sample(frac=0.5)
-    df_odd = df_odd.loc[df_odd['decision_value']<0.2]
+#    df_odd = df_odd.loc[df_odd['pTB1']>0.3]
+#    df_odd = df_odd.loc[df_odd['mBB']>0.3]
+#    df_odd = df_odd.loc[df_odd['decision_value']<0.2]
 
-    ### is there anything to be done here? 
-#    df_odd[variables] = scale(df_odd[variables])
-#    df_even[variables] = scale(df_even[variables])
+    df_odd[variables] = scale(df_odd[variables])
+    df_even[variables] = scale(df_even[variables])
 
-    #Convert mass bin number to categorical
+    # Convert generator class to categorical
     z_even = to_categorical(df_even['generator'], num_classes=2)
-    z_odd = to_categorical(df_even['generator'], num_classes=2)
+    z_odd = to_categorical(df_odd['generator'], num_classes=2)
 
     # Construction of the neural network
     inputs_even = Input(shape=(7,))			# change it wrt number of variables R is trained on
     Rx_even = Sequential()
     Rx_even = Dense(1000, activation="linear")(inputs_even)
     
-    Rx_even = Dense(10000, activation="tanh")(inputs_even)
-    Rx_even = Dense(10000, activation="tanh")(inputs_even)
+    Rx_even = Dense(1000, activation="tanh")(inputs_even)
+    Rx_even = Dense(1000, activation="tanh")(inputs_even)
 
     Rx_even = Dense(2, activation="softmax", name='adversary_output')(Rx_even)
     R_even = Model(input=[inputs_even], output=[Rx_even])
@@ -81,18 +83,25 @@ def main():
     # optimiser of R
     opt_R_even = SGD(lr=LR, momentum=MOM, decay=DEC)
     R_even.compile(loss='binary_crossentropy', optimizer=opt_R_even, metrics=['binary_accuracy'])
-#    R_even.fit(df_even[['mBB','decision_value', 'pTB1', 'dPhiVBB','mTW','Mtop','pTV']], z_even, sample_weight=df_even['adversary_weights'], batch_size=BATCH, epochs=EPOCH)
-    R_even.fit(df_even[['mBB','decision_value', 'pTB1', 'dPhiVBB','mTW','Mtop','pTV']], z_even, class_weight=class_weight, batch_size=BATCH, epochs=EPOCH)
+    R_even.fit(df_even[['mBB','decision_value', 'pTB1', 'dPhiVBB','mTW','Mtop','pTV']], z_even, sample_weight=df_even['EventWeight'], batch_size=BATCH, epochs=EPOCH)
+#    R_even.fit(df_even[['mBB','decision_value', 'pTB1', 'dPhiVBB','mTW','Mtop','pTV']], z_even, class_weight=class_weight, batch_size=BATCH, epochs=EPOCH)
         
     # making predictions and comparing results
     init_scores = R_even.predict(df_odd[['mBB','decision_value', 'pTB1', 'dPhiVBB','mTW','Mtop','pTV']])
-    print(init_scores)
+    print(len(z_odd))
+    print(len(init_scores))
+        
     scores = []
-
+    # testing the roc curve
     for i in range(0,np.size(init_scores, axis = 0)):
         scores.append(maxProb(init_scores[i]))
+        
 #    scores = init_scores
-
+    scores = np.array(scores)
+    fpr, tpr, thresholds = roc(z_odd[:,0], scores[:,0])
+    plt.plot(fpr, tpr, color='darkorange',lw=2)
+    plt.show()
+    
     # adding another column (the categorical probability) to the df object
     df_odd['gen_value_0'] = np.array(scores)[:,0]
     df_odd['gen_value_1'] = np.array(scores)[:,1]
